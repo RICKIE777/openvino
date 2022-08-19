@@ -35,7 +35,7 @@ ov_status_e ov_node_get_shape(ov_output_node_t* node, ov_shape_t* tensor_shape) 
     return ov_status_e::OK;
 }
 
-ov_status_e ov_node_list_get_shape_by_index(ov_output_node_list_t* nodes, size_t idx, ov_shape_t* tensor_shape) {
+ov_status_e ov_node_list_get_shape_by_index(ov_output_const_node_list_t* nodes, size_t idx, ov_shape_t* tensor_shape) {
     if (!nodes || idx >= nodes->size || !tensor_shape) {
         return ov_status_e::INVALID_C_PARAM;
     }
@@ -50,7 +50,7 @@ ov_status_e ov_node_list_get_shape_by_index(ov_output_node_list_t* nodes, size_t
     return ov_status_e::OK;
 }
 
-ov_status_e ov_node_list_get_any_name_by_index(ov_output_node_list_t* nodes, size_t idx, char** tensor_name) {
+ov_status_e ov_node_list_get_any_name_by_index(ov_output_const_node_list_t* nodes, size_t idx, char** tensor_name) {
     if (!nodes || !tensor_name || idx >= nodes->size) {
         return ov_status_e::INVALID_C_PARAM;
     }
@@ -63,7 +63,7 @@ ov_status_e ov_node_list_get_any_name_by_index(ov_output_node_list_t* nodes, siz
     return ov_status_e::OK;
 }
 
-ov_status_e ov_node_list_get_partial_shape_by_index(ov_output_node_list_t* nodes,
+ov_status_e ov_node_list_get_partial_shape_by_index(ov_output_const_node_list_t* nodes,
                                                     size_t idx,
                                                     ov_partial_shape_t** partial_shape) {
     if (!nodes || idx >= nodes->size || !partial_shape) {
@@ -85,7 +85,7 @@ ov_status_e ov_node_list_get_partial_shape_by_index(ov_output_node_list_t* nodes
     return ov_status_e::OK;
 }
 
-ov_status_e ov_node_list_get_element_type_by_index(ov_output_node_list_t* nodes,
+ov_status_e ov_node_list_get_element_type_by_index(ov_output_const_node_list_t* nodes,
                                                    size_t idx,
                                                    ov_element_type_e* tensor_type) {
     if (!nodes || idx >= nodes->size) {
@@ -101,7 +101,7 @@ ov_status_e ov_node_list_get_element_type_by_index(ov_output_node_list_t* nodes,
     return ov_status_e::OK;
 }
 
-void ov_output_node_list_free(ov_output_node_list_t* output_nodes) {
+void ov_output_node_list_free(ov_output_const_node_list_t* output_nodes) {
     if (output_nodes) {
         if (output_nodes->output_nodes)
             delete[] output_nodes->output_nodes;

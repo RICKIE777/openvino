@@ -11,7 +11,7 @@ void get_tensor_info(ov_model_t* model,
                      char** name,
                      ov_shape_t* shape,
                      ov_element_type_e* type) {
-    ov_output_node_list_t output_nodes;
+    ov_output_const_node_list_t output_nodes;
     output_nodes.size = 0;
     output_nodes.output_nodes = nullptr;
     if (input) {
