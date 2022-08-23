@@ -103,7 +103,7 @@ ov_node_list_get_partial_shape_by_index(ov_output_const_node_list_t* port_list, 
  * @return Status code of the operation: OK(0) for success.
  */
 OPENVINO_C_API(ov_status_e)
-ov_node_list_get_element_type_by_index(ov_output_const_node_list_t* port_list, size_t idx, ov_element_type_e* tensor_type);
+ov_node_list_get_element_type(ov_output_const_node_list_t* port_list, size_t idx, ov_element_type_e* tensor_type);
 
 /**
  * @brief free port_list
