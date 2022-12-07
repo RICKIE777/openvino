@@ -356,8 +356,8 @@ GNAPlugin::GNAPlugin(const std::map<std::string, std::string>& configMap) :
     graphCompiler(config) {
     Init();
     SetConfig(configMap);
+    log::set_log_level(gnaFlags->log_level);
     InitGNADevice();
-    GnaLog(gnaFlags->log_level);
 }
 
 void GNAPlugin::Init() {
@@ -385,9 +385,6 @@ void GNAPlugin::InitGNADevice() {
                     !config.dumpXNNPath.empty());
         size_t page_size_bytes = 4096;
         gnamem = std::make_shared<gna_memory_device>(memory::GNAAllocator(gnadevice), page_size_bytes);
-        if (gnaFlags->log_level == ov::log::Level::DEBUG) {
-            gnadevice->enableDiagnostics();
-        }
     }
     graphCompiler.setGNAMemoryPtr(gnamem);
 }
@@ -900,6 +897,9 @@ void GNAPlugin::LoadNetwork(const CNNNetwork& _network) {
     if (sortedNet.empty()) {
         THROW_GNA_EXCEPTION << "Sorted network is empty";
     }
+    // Copy operations connected to memory layer (Assign to state variable) should be executed when all functional layers are calculated.
+    // To simplify, just moving these Copy operations at the end of the execution list
+    std::stable_partition(sortedNet.begin(), sortedNet.end(), [&](CNNLayerPtr layer){return !LayerInfo(layer).isCopyToMemory();});
 
     std::vector<CNNLayerPtr> sortedNoMem;
     std::unordered_map<std::string, std::vector<InferenceEngine::CNNLayerPtr>> memoryPairs;
