@@ -374,10 +374,6 @@ void Convolution::getSupportedDescriptors() {
     bool enforceBrgconv = false;
     attrs.reserve(2);
     withBiases = getOriginalInputsNumber() == 3;
-    auto p = getenv("USE_BRG");
-    if (p) {
-        shouldTryBrgconv = p[0] == '1';
-    }
 
     if (!implPriorities.empty()) {
         isPrimitivesPriorityDefined = true;
@@ -1623,6 +1619,10 @@ void Convolution::initTryBrgconvFlag() {
                 shouldTryBrgconv = false;
             }
         }
+    }
+    auto p = getenv("USE_BRG");
+    if (p) {
+        shouldTryBrgconv = p[0] == '1';
     }
 }
 
