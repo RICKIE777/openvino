@@ -1,4 +1,4 @@
-# Copyright (C) 2018-2022 Intel Corporation
+# Copyright (C) 2018-2023 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse
@@ -19,6 +19,7 @@ from openvino.tools.mo.moc_frontend.analysis import json_model_analysis_dump
 from openvino.tools.mo.moc_frontend.extractor import fe_user_data_repack
 from openvino.tools.mo.utils.class_registration import get_enabled_and_disabled_transforms
 from openvino.tools.mo.utils.error import Error
+from openvino.tools.mo.moc_frontend.pytorch_frontend_utils import pytorch_process_after_convert
 
 
 def moc_pipeline(argv: argparse.Namespace, moc_front_end: FrontEnd):
@@ -147,9 +148,6 @@ def moc_pipeline(argv: argparse.Namespace, moc_front_end: FrontEnd):
                             "Place (operation or tensor) with name {} is not found.".format(name))
             place = node.get('node')
 
-            if node.get('shape'):
-                input_model.set_partial_shape(place, node['shape'])
-
             if node.get('data_type'):
                 dtype = node['data_type']
                 ov_type = Type(dtype)
@@ -177,8 +175,19 @@ def moc_pipeline(argv: argparse.Namespace, moc_front_end: FrontEnd):
                 value = mo_array(casted_list, dtype=dtype)
             else:
                 value = np_map_cast[dtype](value)
-
             value = np.array(value, dtype=dtype)
+
+            ov_shape = input_model.get_partial_shape(place)
+            if node.get('shape'):
+                # set user defined shape
+                ov_shape = PartialShape(node['shape'])
+                input_model.set_partial_shape(place, ov_shape)
+            elif ov_shape.is_dynamic:
+                # in case of dynamic shape (dynamic rank or dynamic dimension)
+                # deduce it based on the value shape and set it
+                ov_shape = PartialShape(value.shape)
+                input_model.set_partial_shape(place, ov_shape)
+
             input_model.set_tensor_value(place, value)
 
     def shape_to_array(shape: PartialShape):
@@ -205,4 +214,8 @@ def moc_pipeline(argv: argparse.Namespace, moc_front_end: FrontEnd):
             input_model.set_partial_shape(place, new_partial_shape)
 
     ngraph_function = moc_front_end.convert(input_model)
+
+    # TO DO: remove as part of PyTorch frontend productization CVS-103615
+    if argv.framework == "pytorch":
+        pytorch_process_after_convert(argv, ngraph_function)
     return ngraph_function

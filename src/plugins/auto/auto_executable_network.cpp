@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2022 Intel Corporation
+// Copyright (C) 2018-2023 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -92,7 +92,7 @@ IE::Parameter AutoExecutableNetwork::GetMetric(const std::string& name) const {
                 bThroughputEnabledInPlugin =
                     _autoSContext->_core->GetConfig(deviceInfo.deviceName,
                         CONFIG_KEY(PERFORMANCE_HINT)).as<std::string>() == CONFIG_VALUE(THROUGHPUT);
-            } catch (...) {
+            } catch (const IE::Exception&) {
                 LOG_DEBUG_TAG("GetMetric:%s for %s", "PERF_HINT config not supported",
                     deviceInfo.deviceName.c_str());
             }
@@ -117,7 +117,7 @@ IE::Parameter AutoExecutableNetwork::GetMetric(const std::string& name) const {
                                 METRIC_KEY(OPTIMAL_BATCH_SIZE), options).as<unsigned int>();
                         LOG_DEBUG_TAG("BATCHING:%s:%ld", "optimal batch size",
                             optimalBatchSize);
-                    } catch (...) {
+                    } catch (const IE::Exception&) {
                         LOG_DEBUG_TAG("BATCHING:%s", "metric OPTIMAL_BATCH_SIZE not supported");
                     }
                 }
@@ -164,7 +164,14 @@ IE::Parameter AutoExecutableNetwork::GetMetric(const std::string& name) const {
                 if (i == 0 && !_autoSchedule->_loadContext[CPU].executableNetwork._ptr) {
                     continue;
                 } else {
-                    exeDevices.push_back(_autoSchedule->_loadContext[i].workName.substr(_autoSchedule->_loadContext[i].workName.find(":") + 1));
+                    std::string exeDevices_string = _autoSchedule->_loadContext[i].workName.substr(_autoSchedule->_loadContext[i].workName.find(":") + 1);
+                    if (exeDevices_string == "CPU_HELP")
+                        exeDevices_string = "(CPU)";
+                    std::stringstream ss(exeDevices_string);
+                    std::string item;
+                    while (getline(ss, item, ',')) {
+                        exeDevices.push_back(item);
+                    }
                     break;
                 }
             }
