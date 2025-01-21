@@ -33,27 +33,27 @@ ov::OutputVector skip_simplified_layer_normalization(const ov::frontend::onnx::N
         input = std::make_shared<v1::Add>(input, nodes[3]);
     }
     float eps = node.get_attribute_value<float>("epsilon");
-    bool simplified = true;
-    // reduce over hidden_size
-    int hidden_size_dim = 2;
-    const auto reduction_axes = v0::Constant::create(ov::element::i32, ov::Shape{1}, {hidden_size_dim});
     
-    std::shared_ptr<ov::Node> mean = std::make_shared<v1::ReduceMean>(input, reduction_axes, true);
-    auto sqr_const = v0::Constant::create(ov::element::f32, ov::Shape{1}, {2});
+    // reduce over hidden_size
+    int hidden_size_dim = -1;
+    const auto reduction_axes = v0::Constant::create(ov::element::i64, ov::Shape{}, {hidden_size_dim});
+
+    ov::element::Type element_type = input->get_output_element_type(0);    
+    auto sqr_const = v0::Constant::create(element_type, ov::Shape{}, {2});
     auto square = std::make_shared<v1::Power>(input, sqr_const);
     auto mean_square = std::make_shared<v1::ReduceMean>(square, reduction_axes, true);
-    auto eps_node = v0::Constant::create(ov::element::f32, ov::Shape{1}, {eps});
+    auto eps_node = v0::Constant::create(element_type, ov::Shape{}, {eps});
     auto eps_add = std::make_shared<v1::Add>(mean_square, eps_node);
     auto sqrt = std::make_shared<v0::Sqrt>(eps_add);
     std::shared_ptr<ov::Node> result = std::make_shared<v1::Divide>(input, sqrt);
 
-    auto one_node = v0::Constant::create(ov::element::f32, ov::Shape{}, {1});
+    auto one_node = v0::Constant::create(element_type, ov::Shape{}, {1});
     std::shared_ptr<ov::Node> inv_std_var = std::make_shared<v1::Divide>(one_node, sqrt); 
 
     // multiply by gamma
     result = std::make_shared<v1::Multiply>(result, nodes[2]);
 
-    return {result, mean, inv_std_var, input};
+    return {result, mean_square, inv_std_var, input};
 }
 ONNX_OP("SkipSimplifiedLayerNormalization", OPSET_SINCE(1), com_microsoft::opset_1::skip_simplified_layer_normalization, MICROSOFT_DOMAIN);
 }  // namespace opset_1
