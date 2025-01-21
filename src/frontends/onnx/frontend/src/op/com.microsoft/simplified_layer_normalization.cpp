@@ -1,4 +1,4 @@
-﻿// Copyright (C) 2018-2024 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -17,11 +17,13 @@
 
 using namespace ov::op;
 using ::ONNX_NAMESPACE::TensorProto_DataType;
+using namespace ov::op::v0;
+using namespace ov::op::v1;
 
 namespace ov {
 namespace frontend {
 namespace onnx {
-namespace com_microsoft {
+namespace ai_onnx {
 namespace opset_1 {
 
 ov::OutputVector simplified_layer_normalization(const ov::frontend::onnx::Node& node) {
@@ -66,12 +68,9 @@ ov::OutputVector simplified_layer_normalization(const ov::frontend::onnx::Node& 
     return ov::OutputVector{scaled, inv_std_var};
 }
 
-ONNX_OP("SimplifiedLayerNormalization",
-        OPSET_SINCE(1),
-        com_microsoft::opset_1::simplified_layer_normalization,
-        MICROSOFT_DOMAIN);
+ONNX_OP("SimplifiedLayerNormalization", OPSET_SINCE(1), ai_onnx::opset_1::simplified_layer_normalization);
 }  // namespace opset_1
-}  // namespace com_microsoft
+}  // namespace ai_onnx
 }  // namespace onnx
 }  // namespace frontend
 }  // namespace ov

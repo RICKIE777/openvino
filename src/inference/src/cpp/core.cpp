@@ -88,6 +88,17 @@ std::shared_ptr<ov::Model> Core::read_model(const std::wstring& model_path, cons
 
 std::shared_ptr<ov::Model> Core::read_model(const std::string& model_path, const std::string& bin_path) const {
     OV_CORE_CALL_STATEMENT(return _impl->read_model(model_path, bin_path););
+    // if (bin_path.empty()) {
+    //     size_t last_slash_idx = model_path.rfind('/');
+    //     std::string model_directory = model_path.substr(0, last_slash_idx);
+    //     std::string model_file_name = model_path.substr(last_slash_idx + 1, model_path.rfind('.') - last_slash_idx - 1);
+    //     std::string binpath = model_file_name + ".bin";
+    //     std::cout << "bin_path: " << bin_path << std::endl;
+    //     OV_CORE_CALL_STATEMENT(return _impl->read_model(model_path, binpath);)
+    // }
+    // else {
+    //     OV_CORE_CALL_STATEMENT(return _impl->read_model(model_path, bin_path););
+    // }
 }
 
 std::shared_ptr<ov::Model> Core::read_model(const std::string& model, const ov::Tensor& weights) const {
