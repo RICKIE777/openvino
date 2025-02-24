@@ -199,8 +199,12 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
     // triangle compare
     // below is 0, upper is -inf.
     auto triu = std::make_shared<v1::Greater>(hori_range, vert_range_offset);            // 12x2048 or 1x2048, ...
-    auto typed_zero = v0::Constant::create(ov::element::f32, ov::Shape{}, {0});
-    auto minus_inf = v0::Constant::create(ov::element::f32, ov::Shape{}, {-std::numeric_limits<float>::infinity()});
+    auto typed_zero = v0::Constant::create(T, ov::Shape{}, {0});
+    std::shared_ptr<ov::Node> minus_inf = nullptr;
+    if (T == ov::element::f32)
+        minus_inf = ov::op::v0::Constant::create(T, ov::Shape{}, {-std::numeric_limits<float>::infinity()});
+    else if (T == ov::element::f16)
+        minus_inf = ov::op::v0::Constant::create(T, ov::Shape{}, {std::numeric_limits<ov::float16>::lowest()});
     auto atten_mask = std::make_shared<v1::Select>(triu, minus_inf, typed_zero);  // 12x2048 or 1x2048, ...
 
     // 2nd step
