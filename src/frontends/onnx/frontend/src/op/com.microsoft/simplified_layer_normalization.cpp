@@ -55,13 +55,12 @@ ov::OutputVector simplified_layer_normalization(const ov::frontend::onnx::Node& 
         X = std::make_shared<v0::Convert>(X, stash_type);
     }
 
-    auto powerConst = ov::op::v0::Constant::create(stash_type, {}, {2.f});
-    auto squared_X =  std::make_shared<ov::op::v1::Power>(X, powerConst); // std::make_shared<v1::Multiply>(X, X);                // X^2
+    auto squared_X = std::make_shared<v1::Multiply>(X, X);                // X^2
     auto mean = std::make_shared<v1::ReduceMean>(squared_X, axes, true);  // mean = (1/N) * Σ(j=1 to N) X_j^2
     auto rms_value =
         std::make_shared<v0::Sqrt>(std::make_shared<v1::Add>(mean, v0::Constant::create(stash_type, {}, {epsilon})));
     auto inv_std_var = std::make_shared<v1::Divide>(v0::Constant::create(stash_type, {}, {1.0}), rms_value);
-    auto normalized = std::make_shared<v1::Divide>(X, rms_value);  // X / RMS(X)
+    auto normalized = std::make_shared<v1::Multiply>(X, inv_std_var);  // X / RMS(X)
 
     auto scaled = std::make_shared<v1::Multiply>(normalized, scale);  // (X / RMS(X)) * scale
 

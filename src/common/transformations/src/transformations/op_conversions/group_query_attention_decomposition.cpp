@@ -130,24 +130,14 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
     // present = concat(K, V) if 'past' input is unavailable
     // or
     // present = concat(past, K, V)
-
-    // for the 1st inference (12 token in), the past kv need to input [1, 32, 2048-12=2036, 96] // [1,32,2036,96]
-    // for the 2nd inference (1 token in), the past kv need to input [1, 32, 2047, 96], the last 12 of 2047 should be the output kv from this node.
     auto construct_kv_cache = [&](const ov::Output<ov::Node>& past, const ov::Output<ov::Node>& current) {
         return std::make_shared<v0::Concat>(ov::OutputVector{past, current}, 2);
     };
 
-#if 1
-    // pask_key, past_value, [1,32,2036,96] or [1,32,2047,96]
-    // K, V,                 [1,32,12,96]   or [1,32,1,96]
     K = construct_kv_cache(past_key, K);
     V = construct_kv_cache(past_value, V);
-    auto present_k = K; // [1,32,2048,96]
-    auto present_v = V; // [1,32,2048,96]
-#else
-    auto present_k = past_key;
-    auto present_v = past_value;
-#endif
+    auto present_k = K;
+    auto present_v = V;
 
     const size_t kv_num_heads_factor = num_heads / kv_num_heads;
     if (kv_num_heads_factor > 1) {
@@ -164,8 +154,8 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
         // (batch_size, num_heads, sequence_len, head_size)
         const auto q_shape_prev_2 = detail::get_dimensions(q_shape, {0, 1});
         auto extended_kv_shape = std::make_shared<v0::Concat>(ov::NodeVector{q_shape_prev_2, kv_shape_last_2}, 0);
-        K = std::make_shared<v1::Reshape>(K, extended_kv_shape, false); // [1,32,2048,96]
-        V = std::make_shared<v1::Reshape>(V, extended_kv_shape, false); // [1,32,2048,96]
+        K = std::make_shared<v1::Reshape>(K, extended_kv_shape, false);
+        V = std::make_shared<v1::Reshape>(V, extended_kv_shape, false);
     }
 
     // consider the mask before softmax op
@@ -186,10 +176,10 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
     auto hori_range = std::make_shared<v0::Unsqueeze>(col_range, zero);  // 1x2048
 
     std::shared_ptr<ov::Node> row_range =
-        std::make_shared<v4::Range>(v0::Constant::create(ov::element::i64, ov::Shape{}, {0}),
+         std::make_shared<v4::Range>(v0::Constant::create(ov::element::i64, ov::Shape{}, {0}),
                                     current_seqlen_scalar,
-                                    one_without_shape,
-                                    ov::element::i64); // [0,1,2,...,11] or [0]
+                                     one_without_shape,
+                                    ov::element::i64);                            // [0,1,2,...,]
     auto vert_range = std::make_shared<v0::Unsqueeze>(row_range, one);   // 12x1 or 1x1
     auto vert_range_offset =
         std::make_shared<v1::Add>(vert_range, empty_sequence_length);  // [2036,2037,...,2047], or [2035], or [2034]
@@ -218,40 +208,28 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
     auto compare_result = std::make_shared<v1::Greater>(hori_range, row_compare_range_offset); // 12x2048 or 1x2048, ... last 12/13/14/... will be True
     auto final_atten_mask = std::make_shared<v1::Select>(compare_result, atten_mask, minus_inf);  // 12x2048 or 1x2048, ...
     // the final atten mask is [-inf, -inf, -inf, ..., -inf, triangle(lower=0, upper=-inf)]
-
-    // Q = [1,32,12,96] or 1,32,1,96], ...
-    // K = [1,32,2048,96] ...
-    // softmax_input = [1,32,12,2048] or [1,32,1,2048], ...
     std::shared_ptr<ov::Node> softmax_input = std::make_shared<v0::MatMul>(Q, K, false, true);
     std::shared_ptr<ov::Node> alpha;
     if (scale == 0.0f) {
         alpha = std::make_shared<v0::Sqrt>(head_size_node);
+        alpha = std::make_shared<v1::Divide>(one, alpha);
     } else {
-        alpha = v0::Constant::create(ov::element::f32, ov::Shape{}, {1.0f / scale});
+        alpha = v0::Constant::create(T, ov::Shape{}, {scale});
     }
-    softmax_input = std::make_shared<v1::Divide>(softmax_input, alpha); // [1,32,12,2048] or [1,32,1,2048], ...
+    softmax_input = std::make_shared<v1::Multiply>(softmax_input, alpha); // [1,32,12,2048] or [1,32,1,2048], ...
 
     std::shared_ptr<ov::Node> softmax_input_added = std::make_shared<v1::Add>(softmax_input, final_atten_mask);
-    // softmax((Q x K' + mask) / sqrt(head_size))
-    const auto softmax = std::make_shared<v8::Softmax>(softmax_input_added, 3); // [1,32,12,2048] or [1,32,1,2048], ...
+    const auto softmax = std::make_shared<v8::Softmax>(softmax_input_added, 3);
 
-    // V = [1,32,2048,96] ...
     // softmax((Q x K' + mask) / sqrt(head_size)) x V
-    std::shared_ptr<ov::Node> qga_output = std::make_shared<v0::MatMul>(softmax, V); // [1,32,12,96] or [1,32,1,96], ...
-
-    // transpose
-    // from (batch_size, num_heads, sequence_length, head_size)
-    // to (batch_size, sequence_length, num_heads, head_size)
+    std::shared_ptr<ov::Node> qga_output = std::make_shared<v0::MatMul>(softmax, V);
+    // transpose the result from (batch_size, num_heads, sequence_length, head_size)
+    // to (batch_size, sequence_length, num_heads * head_size)
     auto perm = v0::Constant::create(ov::element::i64, ov::Shape{4}, {0, 2, 1, 3});
-    auto qga_output_transposed = std::make_shared<v1::Transpose>(qga_output, perm); // [1,12,32,96] or [1,1,32,96], ...
-
-    // reshape to (batch_size, sequence_length, num_heads * head_size)
+    auto qga_output_transposed = std::make_shared<v1::Transpose>(qga_output, perm);
     auto dim_merge_shape = v0::Constant::create(ov::element::i32, ov::Shape{3}, {0, 0, -1});
-    auto output = std::make_shared<v1::Reshape>(qga_output_transposed, dim_merge_shape, true)->output(0); // [1,12,3072] or [1,1,3072], ...
+    auto output = std::make_shared<v1::Reshape>(qga_output_transposed, dim_merge_shape, true)->output(0);
 
-    // output = [1,12,3072] or [1,1,3072], ...
-    // present_k = [1,32,2048,96]
-    // present_v = [1,32,2048,96]
     return {output, present_k, present_v};
 }
 
@@ -331,13 +309,13 @@ std::shared_ptr<ov::Node> rotaryEmbedding(ov::Output<ov::Node> input,
         auto concat_ret = std::make_shared<v0::Concat>(ov::NodeVector{res_0_5d, res_1_5d}, -1);
         return std::make_shared<v1::Reshape>(concat_ret, input_shape, false);
     } else {
-        auto in_split = make_split(input, 2, -1); // 12x48 , 1x48
+        auto in_split = make_split(input, 2, -1);
         auto res_0 = std::make_shared<v1::Subtract>(std::make_shared<v1::Multiply>(in_split[0], cos),
                                                     std::make_shared<v1::Multiply>(in_split[1], sin));
         auto res_1 = std::make_shared<v1::Add>(std::make_shared<v1::Multiply>(in_split[0], sin),
                                                std::make_shared<v1::Multiply>(in_split[1], cos));
 
-        return std::make_shared<v0::Concat>(ov::NodeVector{res_0, res_1}, -1); // 12x96, 1x96
+        return std::make_shared<v0::Concat>(ov::NodeVector{res_0, res_1}, -1);
     }
 }
 }  // namespace
