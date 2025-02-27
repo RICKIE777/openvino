@@ -136,8 +136,16 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
 
     K = construct_kv_cache(past_key, K);
     V = construct_kv_cache(past_value, V);
-    auto present_k = K;
-    auto present_v = V;
+
+    const auto K_node_shape = std::make_shared<v3::ShapeOf>(K);
+    const auto max_sequence_length = detail::get_dimensions(K_node_shape, {2});  // 2048
+    auto max_sequence_length_scalar = std::make_shared<v1::Reshape>(max_sequence_length, one_without_shape, false); // 2048
+    auto empty_sequence_length = std::make_shared<v1::Subtract>(max_sequence_length, seqlens_1d); // 2036 or 2035, 2034...
+
+    // Gather [1:last] as present
+    ov::Output<ov::Node> position = std::make_shared<v4::Range>(current_seqlen_scalar, max_sequence_length_scalar, one_without_shape, ov::element::i64);
+    auto present_k = std::make_shared<v8::Gather>(K, position, two); // 1x32x2048x96
+    auto present_v = std::make_shared<v8::Gather>(V, position, two); // 1x32x2048x96
 
     const size_t kv_num_heads_factor = num_heads / kv_num_heads;
     if (kv_num_heads_factor > 1) {
@@ -161,10 +169,6 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
     // consider the mask before softmax op
     // need to apply low-triangle mask to attention score.
     // two steps
-    const auto K_node_shape = std::make_shared<v3::ShapeOf>(K);
-    const auto max_sequence_length = detail::get_dimensions(K_node_shape, {2});  // 2048
-    auto max_sequence_length_scalar = std::make_shared<v1::Reshape>(max_sequence_length, one_without_shape, false); // 2048
-    auto empty_sequence_length = std::make_shared<v1::Subtract>(max_sequence_length, seqlens_1d); // 2036 or 2035, 2034...
 
     // 1st step
     // construct the current_seqlen x max_seqlen mask, and apply triangle compare
