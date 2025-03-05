@@ -107,7 +107,7 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
     auto real_seqlens = std::make_shared<v1::Add>(seqlens_elemi64, one);
 
     // Only consider batch is 1
-    auto seqlens_1d = std::make_shared<v1::Reshape>(real_seqlens, one, false);
+    auto seqlens_1d = std::make_shared<v1::Reshape>(real_seqlens, one, false); // 12 or 13, ..
     auto past_sequence_length = std::make_shared<v1::Subtract>(seqlens_1d, current_sequence_length);
     auto current_seqlen_scalar = std::make_shared<v1::Reshape>(current_sequence_length, one_without_shape, false); // 12 or 1
 
@@ -134,28 +134,20 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
         return std::make_shared<v0::Concat>(ov::OutputVector{past, current}, 2);
     };
 
+    // 1x32x2048x96 (last 12 or 13 make sense)
     K = construct_kv_cache(past_key, K);
     V = construct_kv_cache(past_value, V);
 
     const auto K_node_shape = std::make_shared<v3::ShapeOf>(K);
-    const auto concat_kv_sequence_length = detail::get_dimensions(K_node_shape, {2});  // 2048 + 12/1
-    auto concat_kv_sequence_length_scalar = std::make_shared<v1::Reshape>(concat_kv_sequence_length, one_without_shape, false); // 2048+12/1
-
-
-    const auto pastK_node_shape = std::make_shared<v3::ShapeOf>(past_key);
-    const auto pastk_sequence_length = detail::get_dimensions(pastK_node_shape, {2});  // 2048
-    auto pastk_sequence_length_scalar = std::make_shared<v1::Reshape>(pastk_sequence_length, one_without_shape, false); // 2048
-    auto empty_sequence_length = std::make_shared<v1::Subtract>(pastk_sequence_length, seqlens_1d); // 2036 or 2035, 2034...
+    const auto concat_kv_sequence_length = detail::get_dimensions(K_node_shape, {2});  // 2036+12 or 2047+1 = 2048
+    auto concat_kv_sequence_length_scalar = std::make_shared<v1::Reshape>(concat_kv_sequence_length, one_without_shape, false); // 2048
 
     // Gather [1:last] as present
-    // 12:2048+12
-    // 1:2048+1
-    // results a 2048 length position
-    ov::Output<ov::Node> position = std::make_shared<v4::Range>(current_seqlen_scalar, concat_kv_sequence_length_scalar, one_without_shape, ov::element::i64);
-    K = std::make_shared<v8::Gather>(K, position, two); // 1x32x1024x96
-    V = std::make_shared<v8::Gather>(V, position, two); // 1x32x1024x96
-    auto present_k = K;
-    auto present_v = V;
+    // 1:2048
+    // results a 2047 length position, no matter prefill or kvcache
+    ov::Output<ov::Node> position = std::make_shared<v4::Range>(one_without_shape, concat_kv_sequence_length_scalar, one_without_shape, ov::element::i32);
+    auto present_k = std::make_shared<v8::Gather>(K, position, two); // 1x32x2047x96
+    auto present_v = std::make_shared<v8::Gather>(V, position, two); // 1x32x2047x96
 
     const size_t kv_num_heads_factor = num_heads / kv_num_heads;
     if (kv_num_heads_factor > 1) {
@@ -184,7 +176,7 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
     // construct the current_seqlen x max_seqlen mask, and apply triangle compare
     std::shared_ptr<ov::Node> col_range =
         std::make_shared<v4::Range>(v0::Constant::create(ov::element::i64, ov::Shape{}, {0}),
-                                    pastk_sequence_length_scalar,
+                                    concat_kv_sequence_length_scalar,
                                     one_without_shape,
                                     ov::element::i64); // [0,1,2,...,2047]
     auto hori_range = std::make_shared<v0::Unsqueeze>(col_range, zero);  // 1x2048
@@ -193,12 +185,11 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
          std::make_shared<v4::Range>(v0::Constant::create(ov::element::i64, ov::Shape{}, {0}),
                                     current_seqlen_scalar,
                                     one_without_shape,
-                                    ov::element::i64);                            // [0,1,2,...,]
+                                    ov::element::i64); // [0,1,2,...,] or [0]
     auto vert_range = std::make_shared<v0::Unsqueeze>(row_range, one);   // 12x1 or 1x1
-    auto vert_range_offset =
-        std::make_shared<v1::Add>(vert_range, empty_sequence_length);  // [2036,2037,...,2047], or [2035], or [2034]
-    vert_range_offset =
-        std::make_shared<v1::Add>(vert_range_offset, past_sequence_length);  // [2036,2037,...,2047], or [2047], or [2047], ...
+    const auto pastK_node_shape = std::make_shared<v3::ShapeOf>(past_key);
+    const auto pastk_sequence_length = detail::get_dimensions(pastK_node_shape, {2});  // 2036 or 2047
+    auto vert_range_offset = std::make_shared<v1::Add>(vert_range, pastk_sequence_length);  // [2036,2037,...,2047], or [2047]
 
     // triangle compare
     // below is 0, upper is -inf.
@@ -214,6 +205,7 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::decompose(
     // 2nd step
     // col index compare, 0-threshold col index, mask is -inf
     auto row_index_shape = std::make_shared<v0::Concat>(ov::NodeVector{current_sequence_length, one}, 0);
+    auto empty_sequence_length = std::make_shared<v1::Subtract>(concat_kv_sequence_length, seqlens_1d); // 2036 or 2035, 2034...
     auto row_index = std::make_shared<v3::Broadcast>(empty_sequence_length, row_index_shape); // shape = 12x1 or 1x1, data = [2036, ...] or [2035, ...] or [2034, ...]
     auto row_compare_range_offset = std::make_shared<v1::Subtract>(row_index, one); // shape = 12x1 or 1x1, data = [2035, ...] or [2034, ...] or [2033, ...]
 
