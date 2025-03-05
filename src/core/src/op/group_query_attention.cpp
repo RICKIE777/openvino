@@ -43,7 +43,7 @@ void GroupQueryAttention::validate_and_infer_types() {
     Dimension output_kv_len;
     Dimension past_sequence_len = get_input_partial_shape(3)[2];
     if (past_sequence_len.is_static() && sequence_len.is_static()) {
-        output_kv_len = past_sequence_len;
+        output_kv_len = past_sequence_len + sequence_len - 1;
     } else {
         output_kv_len = ov::Dimension();
     }
