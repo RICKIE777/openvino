@@ -217,6 +217,15 @@ ov::OutputVector ov::pass::GroupQueryAttentionDecomposition::make_split(const ov
 }
 
 std::shared_ptr<ov::Node> ov::pass::GroupQueryAttentionDecomposition::get_dimensions(
+    const ov::Output<ov::Node>& node,
+    const std::vector<int>& dims) {
+    using namespace ov::op;
+    const auto zero = v0::Constant::create(ov::element::i32, ov::Shape{}, {0});
+    const auto dims_const = v0::Constant::create(ov::element::i32, ov::Shape{dims.size()}, dims);
+    return register_new_node<v8::Gather>(node, dims_const, zero);
+}
+
+std::shared_ptr<ov::Node> ov::pass::GroupQueryAttentionDecomposition::get_dimensions(
     const std::shared_ptr<ov::op::v3::ShapeOf>& shape,
     const std::vector<int>& dims) {
     using namespace ov::op;
@@ -246,7 +255,6 @@ std::shared_ptr<ov::Node> ov::pass::GroupQueryAttentionDecomposition::rotaryEmbe
     if (interleaved) {
         auto two = v0::Constant::create(ov::element::i64, ov::Shape{1}, {2});
 
-        auto cache_shape = register_new_node<v3::ShapeOf>(cos_cache);
         auto cache_last_dim = get_dimensions(cos_cache, {-1});
 
         auto input_shape = register_new_node<v3::ShapeOf>(input);
